@@ -876,6 +876,12 @@ class UnifiClient(metaclass=MetaNameFixer):
         "self",
         )
 
+    list_udm_self = UnifiAPICallNoSite(
+        "Get info about the logged in user for a UDM instance",
+        "/api/users/self",
+        response_key=None,
+        )
+
     list_vouchers = UnifiAPICall(
         "List vouchers",
         "stat/voucher",

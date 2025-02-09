@@ -14,8 +14,11 @@ import unificontrol
 def unifi_test(host, port, username, password, site, path_prefix):
     c = unificontrol.UnifiClient(host=host, port=port, username=username, password=password,
                                  site=site, path_prefix=path_prefix)
-    sysinfo = c.stat_sysinfo()
-    print(json.dumps(sysinfo, indent=4))
+    try:
+        list_self = c.list_self()
+    except:
+        list_self = c.list_udm_self()
+    print(json.dumps(list_self, indent=4))
 
 if __name__ == "__main__":
     unifi_test(auto_envvar_prefix="UNIFI_TEST")
