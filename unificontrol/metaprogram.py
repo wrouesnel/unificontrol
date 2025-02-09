@@ -33,7 +33,8 @@ class _UnifiAPICall:
                  path_arg_in_request_body=False,
                  json_args=None, json_body_name=None, json_fix=None,
                  rest_command=None, method=None,
-                 need_login=True):
+                 need_login=True,
+                 response_key="data"):
         self._endpoint = endpoint
         self._path_arg_name = path_arg_name
         self._path_arg_in_request_body = path_arg_in_request_body
@@ -41,6 +42,7 @@ class _UnifiAPICall:
         self._json_body_name = json_body_name
         self._rest = rest_command
         self._need_login = need_login
+        self._response_key = response_key
         if not isinstance(json_fix, (list, tuple, type(None))):
             json_fix = [json_fix]
         self._fixes = json_fix
@@ -76,8 +78,14 @@ class _UnifiAPICall:
     def _build_url(self, client, path_arg):
         if not client.site:
             raise UnifiAPIError("No site specified for site-specific call")
-        return "https://{host}:{port}/api/s/{site}/{endpoint}{path}".format(
+
+        path_prefix = ""
+        if client.path_prefix is not None:
+            path_prefix = f"{path_prefix}/".format(path_prefix=client.path_prefix)
+
+        return "https://{host}:{port}/{path_prefix}api/s/{site}/{endpoint}{path}".format(
             host=client.host, port=client.port, site=client.site,
+            path_prefix=path_prefix,
             endpoint=self._endpoint,
             path="/" + path_arg if path_arg else "")
 
@@ -105,7 +113,7 @@ class _UnifiAPICall:
             for fix in self._fixes:
                 rest_dict = fix(rest_dict)
         url = self._build_url(client, path_arg)
-        return client._execute(url, self._method, rest_dict, need_login=self._need_login)
+        return client._execute(url, self._method, rest_dict, need_login=self._need_login, response_key=self._response_key)
 
 class _UnifiAPICallNoSite(_UnifiAPICall):
     # pylint: disable=too-few-public-methods

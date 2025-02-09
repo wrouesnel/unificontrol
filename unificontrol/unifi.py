@@ -69,11 +69,15 @@ class UnifiClient(metaclass=MetaNameFixer):
             Pass ``None`` to use regular certificate verification or the
             constant ``FETCH_CERT`` to use the current certificate of the server
             and pin that cert for future accesses.
+        path_prefix (str): prefix path to add to calls. This is required for
+            compatibility with Ubiquiti's integrated products such as the Unifi Dream
+            Machine which proxy the network application behind `/proxy/network`.
+            This can be used to access other applications as well.
     """
 
     def __init__(self, host="localhost", port=8443,
                  username="admin", password=None, site="default",
-                 cert=FETCH_CERT):
+                 cert=FETCH_CERT, path_prefix=None):
         self._host = host
         self._port = port
         self._user = username
@@ -89,7 +93,12 @@ class UnifiClient(metaclass=MetaNameFixer):
             adaptor = PinningHTTPSAdapter(cert)
             self._session.mount("https://{}:{}".format(host, port), adaptor)
 
-    def _execute(self, url, method, rest_dict, need_login=True):
+        self.path_prefix = path_prefix
+
+        # This variable caches the login function for the client after first use.
+        self._current_login_fn = None
+
+    def _execute(self, url, method, rest_dict, need_login=True, response_key="data"):
         request = requests.Request(method, url, json=rest_dict)
         ses = self._session
 
@@ -110,7 +119,7 @@ class UnifiClient(metaclass=MetaNameFixer):
             response = resp.json()
             if 'meta' in response and response['meta']['rc'] != 'ok':
                 raise UnifiAPIError(response['meta']['msg'])
-            return response['data']
+            return response[response_key] if response_key is not None else response
         else:
             raise UnifiTransportError("{}: {}".format(resp.status_code, resp.reason))
 
@@ -133,6 +142,17 @@ class UnifiClient(metaclass=MetaNameFixer):
     def site(self, site_name):
         self._site = site_name
 
+    @property
+    def path_prefix(self):
+        """str: Identifier of site being managed"""
+        return self._path_prefix
+
+    @path_prefix.setter
+    def path_prefix(self, path_prefix):
+        """str | None: Prefix to add to API calls"""
+        self._path_prefix = path_prefix.strip("/") if path_prefix != "" else None
+
+
     # From here on down most of the methods are defined using an
     # abstract representation of the API.
 
@@ -142,8 +162,22 @@ class UnifiClient(metaclass=MetaNameFixer):
         json_args=["username", "password"],
         need_login=False)
 
+    _login_udm = UnifiAPICallNoSite(
+        "raw login command",
+        "auth/login",
+        json_args=["username", "password"],
+        need_login=False,
+        response_key=None)
+
+    # List of login functions and the order to try them in. The successful one is cached.
+    _login_fns = (_login, _login_udm)
+
     def login(self, username=None, password=None):
         """Log in to Unifi controller
+
+        This function will default to trying a normal controller login, and if that fails
+        will attempt to login through the UDM endpoint. The method which succeeds is cached
+        in the client.
 
         Args:
             username (str): `optional` user name for admin account
@@ -152,8 +186,23 @@ class UnifiClient(metaclass=MetaNameFixer):
         The username and password arguments are optional if they were provided
         when the client was created.
         """
-        self._login(username=username if username else self._user,
-                    password=password if password else self._password)
+
+        login_fns = [self._current_login_fn] if self._current_login_fn is not None else [] + [ fn for fn in self._login_fns if fn is not self._current_login_fn ]
+
+        errors = []
+
+        for login_fn in login_fns:
+            try:
+                login_fn(client=self, username=username if username else self._user,
+                         password=password if password else self._password)
+                # If we succeed then stop.
+                self._current_login_fn = login_fn
+                return
+            except UnifiTransportError as e:
+                errors.append((login_fn, e))
+
+        # Return the first error we got
+        raise errors[0][1]
 
     logout = UnifiAPICallNoSite(
         "Log out from Unifi controller",
