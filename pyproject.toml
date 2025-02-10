@@ -3,7 +3,7 @@ name = "unificontrol"
 version = "0.2.9"
 description = "A high-level Python interface to the Unifi controller software"
 readme = "README.md"
-requires-python = ">=3.11,<4.0"
+requires-python = ">=3.10,<4.0"
 dependencies = [
     "requests>=2.32.3",
 ]
