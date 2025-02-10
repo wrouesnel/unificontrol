@@ -1,0 +1,14 @@
+[project]
+name = "unificontrol"
+version = "0.2.9"
+description = "A high-level Python interface to the Unifi controller software"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.32.3",
+]
+
+[dependency-groups]
+dev = [
+    "click>=8.1.8",
+]
