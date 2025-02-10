@@ -104,8 +104,14 @@ class UnifiClient(metaclass=MetaNameFixer):
 
         resp = ses.send(ses.prepare_request(request))
 
+        # Newer require the X-CSRF-Token header
+        if "x-csrf-token" in resp.headers:
+            ses.headers["X-CSRF-Token"] = resp.headers["x-csrf-token"]
+        if "x-updated-csrf-token" in resp.headers:
+            ses.headers["X-CSRF-Token"] = resp.headers["x-updated-csrf-token"]
+
         # If we fail with unauthorised and need login then retry just once
-        if resp.status_code == 401 and need_login:
+        if resp.status_code in (401,) and need_login:
             try:
                 self.login()
             except UnifiTransportError:
@@ -114,6 +120,11 @@ class UnifiClient(metaclass=MetaNameFixer):
                 else:
                     raise UnifiLoginError("Need user name and password to log in")
             resp = ses.send(ses.prepare_request(request))
+            # Newer require the X-CSRF-Token header
+            if "x-csrf-token" in resp.headers:
+                ses.headers["X-CSRF-Token"] = resp.headers["x-csrf-token"]
+            if "x-updated-csrf-token" in resp.headers:
+                ses.headers["X-CSRF-Token"] = resp.headers["x-updated-csrf-token"]
 
         if resp.ok:
             response = resp.json()
