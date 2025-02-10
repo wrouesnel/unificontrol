@@ -26,6 +26,12 @@ class MetaNameFixer(type):
 class UnspecifiedResponseKey:
     """Special class used to indicate no user preference for the response key"""
 
+class NoResponseBody:
+    """Special class used to indicate there is no response body expected.
+
+    API v2 DELETE sets this automatically.
+    """
+
 # These are classes who's instances represent API calls to the Unifi controller
 class _UnifiAPICall:
     # pylint: disable=too-many-instance-attributes, too-many-arguments
@@ -136,8 +142,12 @@ class _UnifiAPICall:
             # Version 2 APIs default to not using the data key
             response_key = None
 
+        no_response = False
+        if self._api_version > 1 and self._method.lower() == "delete" and self._response_key is UnspecifiedResponseKey:
+            no_response = True
+
         return client._execute(url, self._method, rest_dict, need_login=self._need_login,
-                               response_key=response_key)
+                               response_key=response_key, no_response=no_response)
 
 class _UnifiAPICallNoSite(_UnifiAPICall):
     # pylint: disable=too-few-public-methods

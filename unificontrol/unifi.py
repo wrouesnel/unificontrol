@@ -98,7 +98,7 @@ class UnifiClient(metaclass=MetaNameFixer):
         # This variable caches the login function for the client after first use.
         self._current_login_fn = None
 
-    def _execute(self, url, method, rest_dict, need_login=True, response_key="data"):
+    def _execute(self, url, method, rest_dict, need_login=True, response_key="data", no_response=False):
         request = requests.Request(method, url, json=rest_dict)
         ses = self._session
 
@@ -127,10 +127,13 @@ class UnifiClient(metaclass=MetaNameFixer):
                 ses.headers["X-CSRF-Token"] = resp.headers["x-updated-csrf-token"]
 
         if resp.ok:
-            response = resp.json()
-            if 'meta' in response and response['meta']['rc'] != 'ok':
-                raise UnifiAPIError(response['meta']['msg'])
-            return response[response_key] if response_key is not None else response
+            if not no_response:
+                response = resp.json()
+                if 'meta' in response and response['meta']['rc'] != 'ok':
+                    raise UnifiAPIError(response['meta']['msg'])
+                return response[response_key] if response_key is not None else response
+            else:
+                return None
         else:
             raise UnifiTransportError("{}: {}".format(resp.status_code, resp.reason))
 
