@@ -23,6 +23,9 @@ class MetaNameFixer(type):
                 attr.__name__ = attr_name
         super(MetaNameFixer, cls).__init__(name, bases, dct)
 
+class UnspecifiedResponseKey:
+    """Special class used to indicate no user preference for the response key"""
+
 # These are classes who's instances represent API calls to the Unifi controller
 class _UnifiAPICall:
     # pylint: disable=too-many-instance-attributes, too-many-arguments
@@ -34,7 +37,8 @@ class _UnifiAPICall:
                  json_args=None, json_body_name=None, json_fix=None,
                  rest_command=None, method=None,
                  need_login=True,
-                 response_key="data"):
+                 response_key=UnspecifiedResponseKey,
+                 api_version=1):
         self._endpoint = endpoint
         self._path_arg_name = path_arg_name
         self._path_arg_in_request_body = path_arg_in_request_body
@@ -43,6 +47,7 @@ class _UnifiAPICall:
         self._rest = rest_command
         self._need_login = need_login
         self._response_key = response_key
+        self._api_version = api_version
         if not isinstance(json_fix, (list, tuple, type(None))):
             json_fix = [json_fix]
         self._fixes = json_fix
@@ -81,11 +86,21 @@ class _UnifiAPICall:
 
         path_prefix = ""
         if client.path_prefix is not None:
-            path_prefix = f"{path_prefix}/".format(path_prefix=client.path_prefix)
+            path_prefix = "{path_prefix}/".format(path_prefix=client.path_prefix)
 
-        return "https://{host}:{port}/{path_prefix}api/s/{site}/{endpoint}{path}".format(
-            host=client.host, port=client.port, site=client.site,
+        # v1 APIs have nothing, v2 has a path prefix
+        api_specification = "api"
+        site_specification = "s/{site}".format(site=client.site)
+        if self._api_version > 1:
+            api_specification="v{api_version}/api".format(api_version=self._api_version)
+            # v2 APIs use a different site specification
+            site_specification = "site/{site}".format(site=client.site)
+            # If not specified, the data key isn't included for a v2 API
+
+        return "https://{host}:{port}/{path_prefix}{api_specification}/{site_specification}/{endpoint}{path}".format(
+            host=client.host, port=client.port, site_specification=site_specification,
             path_prefix=path_prefix,
+            api_specification=api_specification,
             endpoint=self._endpoint,
             path="/" + path_arg if path_arg else "")
 
@@ -113,7 +128,16 @@ class _UnifiAPICall:
             for fix in self._fixes:
                 rest_dict = fix(rest_dict)
         url = self._build_url(client, path_arg)
-        return client._execute(url, self._method, rest_dict, need_login=self._need_login, response_key=self._response_key)
+
+        response_key = "data"
+        if self._response_key is not UnspecifiedResponseKey:
+            response_key = self._response_key
+        elif self._api_version > 1:
+            # Version 2 APIs default to not using the data key
+            response_key = None
+
+        return client._execute(url, self._method, rest_dict, need_login=self._need_login,
+                               response_key=response_key)
 
 class _UnifiAPICallNoSite(_UnifiAPICall):
     # pylint: disable=too-few-public-methods
