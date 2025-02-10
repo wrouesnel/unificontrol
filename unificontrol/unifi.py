@@ -26,6 +26,7 @@ import ssl
 import tempfile
 import atexit
 import os
+import time
 
 # Dependencies
 import requests
@@ -72,12 +73,18 @@ class UnifiClient(metaclass=MetaNameFixer):
         path_prefix (str): prefix path to add to calls. This is required for
             compatibility with Ubiquiti's integrated products such as the Unifi Dream
             Machine which proxy the network application behind `/proxy/network`.
-            This can be used to access other applications as well.
+            This can be used to access other applications as well.\
+        login_retries (int): number of times to attempt logging into the controller
+            if there's a failure. This can happen when a large number of logins
+            happen in short order.
+        login_mode (str): select login mode of "normal" or "udm". If not specified or
+            None, then attempt to autodetect.
     """
 
     def __init__(self, host="localhost", port=8443,
                  username="admin", password=None, site="default",
-                 cert=FETCH_CERT, path_prefix=None):
+                 cert=FETCH_CERT, path_prefix=None, login_retries=1,
+                 login_mode=None, request_backoff_secs=1):
         self._host = host
         self._port = port
         self._user = username
@@ -94,15 +101,24 @@ class UnifiClient(metaclass=MetaNameFixer):
             self._session.mount("https://{}:{}".format(host, port), adaptor)
 
         self.path_prefix = path_prefix
+        self._login_retries = int(login_retries)
+        self._login_mode = login_mode
+        if self._login_mode is not None and self._login_mode not in ("normal","udm"):
+            raise ValueError("Unknown login mode requested")
+
+        self._request_backoff_secs = request_backoff_secs
 
         # This variable caches the login function for the client after first use.
         self._current_login_fn = None
+        self._current_logout_fn = None
 
     def _execute(self, url, method, rest_dict, need_login=True, response_key="data", no_response=False):
         request = requests.Request(method, url, json=rest_dict)
         ses = self._session
 
-        resp = ses.send(ses.prepare_request(request))
+        while (resp := ses.send(ses.prepare_request(request))).status_code in (429,):
+            # If we get a 429 then back off the number of requests
+            time.sleep(self._request_backoff_secs)
 
         # Newer require the X-CSRF-Token header
         if "x-csrf-token" in resp.headers:
@@ -112,13 +128,15 @@ class UnifiClient(metaclass=MetaNameFixer):
 
         # If we fail with unauthorised and need login then retry just once
         if resp.status_code in (401,) and need_login:
-            try:
-                self.login()
-            except UnifiTransportError:
-                if self._user and self._password:
-                    raise UnifiLoginError("Invalid credentials")
-                else:
-                    raise UnifiLoginError("Need user name and password to log in")
+            for _ in range(self._login_retries):
+                try:
+                    self.login()
+                    break
+                except UnifiTransportError:
+                    if self._user and self._password:
+                        raise UnifiLoginError("Invalid credentials")
+                    else:
+                        raise UnifiLoginError("Need user name and password to log in")
             resp = ses.send(ses.prepare_request(request))
             # Newer require the X-CSRF-Token header
             if "x-csrf-token" in resp.headers:
@@ -201,13 +219,21 @@ class UnifiClient(metaclass=MetaNameFixer):
         when the client was created.
         """
 
-        login_fns = [self._current_login_fn] if self._current_login_fn is not None else [] + [ fn for fn in self._login_fns if fn is not self._current_login_fn ]
+        login_fns = []
+        if self._login_mode == "normal":
+            login_fns.append(self._login)
+        elif self._login_mode == "udm":
+            login_fns.append(self._login_udm)
+        else:
+            if self._current_login_fn is not None:
+                login_fns.append(self._current_login_fn)
+            login_fns.extend([ fn for fn in self._login_fns if fn is not self._current_login_fn ])
 
         errors = []
 
         for login_fn in login_fns:
             try:
-                login_fn(client=self, username=username if username else self._user,
+                login_fn(username=username if username else self._user,
                          password=password if password else self._password)
                 # If we succeed then stop.
                 self._current_login_fn = login_fn
@@ -218,10 +244,47 @@ class UnifiClient(metaclass=MetaNameFixer):
         # Return the first error we got
         raise errors[0][1]
 
-    logout = UnifiAPICallNoSite(
+    _logout = UnifiAPICallNoSite(
         "Log out from Unifi controller",
         "logout",
         need_login=False)
+
+    _logout_udm = UnifiAPICallNoSite(
+        "Log out from Unifi controller",
+        "auth/logout",
+        need_login=False,
+        api_version=2,
+        method="POST"
+    )
+
+    _logout_fns = (_logout, _logout_udm)
+
+    def logout(self):
+        """Log out of the Unifi controller"""
+        
+        logout_fns = []
+        if self._login_mode == "normal":
+            logout_fns.append(self._logout)
+        elif self._login_mode == "udm":
+            logout_fns.append(self._logout_udm)
+        else:
+            if self._current_logout_fn is not None:
+                logout_fns.append(self._current_logout_fn)
+            logout_fns.extend([ fn for fn in self._logout_fns if fn is not self._current_logout_fn ])
+
+        errors = []
+
+        for logout_fn in logout_fns:
+            try:
+                logout_fn()
+                # If we succeed then stop.
+                self._current_logout_fn = logout_fn
+                return
+            except UnifiTransportError as e:
+                errors.append((logout_fn, e))
+
+        # Return the first error we got
+        raise errors[0][1]
 
     # Functions for dealing with guest and client devices
 
