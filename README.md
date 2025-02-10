@@ -6,6 +6,12 @@ be published as a new package. The original project is found [here](https://gith
 This fork is focused on ensuring sensible control of the Unifi Dream Machine type interfaces
 and adds features to that effect.
 
+Notable fixes:
+
+* Can login using the same basic interface
+* Can handle the proxied endpoints
+* Correctly sends the X-CSRF-Tokens
+
 A high-level Python interface to the Unifi controller software
 ==============================================================
 
