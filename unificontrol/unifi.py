@@ -233,7 +233,7 @@ class UnifiClient(metaclass=MetaNameFixer):
 
         for login_fn in login_fns:
             try:
-                login_fn(self, username=username if username else self._user,
+                login_fn(username=username if username else self._user,
                          password=password if password else self._password)
                 # If we succeed then stop.
                 self._current_login_fn = login_fn
@@ -276,7 +276,7 @@ class UnifiClient(metaclass=MetaNameFixer):
 
         for logout_fn in logout_fns:
             try:
-                logout_fn(self)
+                logout_fn()
                 # If we succeed then stop.
                 self._current_logout_fn = logout_fn
                 return
